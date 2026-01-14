@@ -1,0 +1,28 @@
+# Nextflow work directories
+work/
+.nextflow*
+
+# Large data files
+*.bam
+*.bam.bai
+*.fastq.gz
+*.bed.gz
+
+# Results directories
+processed_bams_pe/
+results/
+
+# Logs
+*.log
+nohup.out
+
+# HTML reports
+*.html
+
+# Python
+__pycache__/
+*.pyc
+
+# R
+.Rhistory
+.RData
