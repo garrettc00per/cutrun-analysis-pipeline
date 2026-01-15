@@ -5,7 +5,8 @@
 ### Current Structure
 - **main.nf**: Orchestrator that calls modules
 - **modules/bam_processing.nf**: BAM QC and fragment extraction
-- Outputs go to `results/bam_processing/`
+- **modules/bedgraph_normalization.nf**: Spike-in normalization and replicate averaging ✅
+- Outputs go to `results/bam_processing/`, `results/normalized_bedgraphs/`, `results/baseline_normalized/`, `results/averaged_bedgraphs/`
 
 ### Key Technical Decisions
 
@@ -23,10 +24,16 @@
 5. Extract fragments < 1000 bp
 6. Generate bedGraph coverage
 
+**Normalization Steps:**
+1. Apply spike-in normalization factors from `normalization_factors.tsv`
+2. Baseline correction (subtract minimum signal for visualization)
+3. Average biological replicates (R1 + R2)
+
 **Performance:**
-- ~6.5 minutes per sample on AWS EC2 (64 CPUs)
-- 2 samples in parallel: 13m 25s
-- Full 72 samples: ~60 minutes estimated
+- BAM Processing: ~6.5 minutes per sample on AWS EC2 (64 CPUs)
+- Normalization: <1 minute for all samples (very fast)
+- 2 samples full pipeline: ~16 minutes total
+- Full 72 samples: ~70 minutes estimated
 
 ### Known Issues / Gotchas
 
@@ -40,19 +47,45 @@
 - Fixed with `stageInMode = 'symlink'` in config
 - Without this, pipeline is 5-10x slower
 
+**Resume behavior:**
+- Use `-resume` to skip completed steps when iterating
+- Changing process names breaks cache (Nextflow sees it as new process)
+- Don't delete `work/` directory unless you want to re-run everything
+
+**publishDir requires params.outdir:**
+- Each module needs `params.outdir = 'results'` at the top
+- Without this, files go to `null/` directory
+
+### Module Development Notes
+
+**Process vs Workflow naming:**
+- Process: Describes what it does (e.g., `FILTER_BAMS`)
+- Workflow: Module name for import (e.g., `BAM_PROCESSING`)
+- Use `as` in main.nf for clean naming: `include { RUN_BAM_PROCESSING as BAM_PROCESSING }`
+
+**Emitting outputs:**
+- Always emit as tuples: `tuple val(sample_id), path(file)`
+- Normalization needs `[sample_id, file]` format to join with factors
+- Use `emit:` block at end of workflow to pass data between modules
+
 ### Future Development Plans
 
-**Phase 1: Spike-in QC Module** (Next)
-- Collect alignment statistics (human vs E.coli)
-- Output: CSV with percentages per sample
-- User manually calculates normalization factors
+**Phase 1: Bedgraph Normalization** ✅ COMPLETE
+- Apply spike-in normalization factors
+- Baseline correction for visualization
+- Average biological replicates
 
-**Phase 2: Peak Calling Module**
+**Phase 2: Spike-in Alignment Module** (Next)
+- Align FASTQs to human + E.coli genomes with BWA
+- Calculate normalization factors automatically
+- Remove manual normalization_factors.tsv requirement
+
+**Phase 3: Peak Calling Module**
 - SEACR for CUT&RUN data
-- Optional: Apply spike-in normalization factors
+- Use normalized bedgraphs as input
 - Generate peak BED files
 
-**Phase 3: Differential Binding** (Optional)
+**Phase 4: Differential Binding** (Optional)
 - DiffBind or csaw
 - Compare conditions
 
@@ -64,6 +97,15 @@ head -2 samples.txt > test_samples.txt
 time nextflow run main.nf --sample_list test_samples.txt
 ```
 
+**Resume after changes:**
+```bash
+# Modify a module
+nano modules/bedgraph_normalization.nf
+
+# Re-run - only changed parts execute
+nextflow run main.nf --sample_list test_samples.txt -resume
+```
+
 **Full run (72 samples):**
 ```bash
 nextflow run main.nf -bg > pipeline.log 2>&1
@@ -72,7 +114,11 @@ tail -f pipeline.log
 
 **Clean up between runs:**
 ```bash
+# Nuclear option - deletes everything
 rm -rf work/ .nextflow* results/
+
+# Safer - keep cache, remove bad outputs
+rm -rf null/
 ```
 
 ### Dependencies
@@ -82,6 +128,7 @@ rm -rf work/ .nextflow* results/
 - samtools, bedtools (available in PATH)
 - ENCODE blacklist: ENCFF356LFX.bed.gz (8KB)
 - Genome sizes: GRCh38.p13.chrom.sizes (11KB)
+- normalization_factors.tsv (user-provided, tab-separated)
 
 ### Git/GitHub
 
@@ -94,6 +141,7 @@ rm -rf work/ .nextflow* results/
 - results/
 - *.bam files
 - test_samples.txt
+- null/
 
 ### Pipeline Context
 

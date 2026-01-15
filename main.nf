@@ -1,44 +1,37 @@
 #!/usr/bin/env nextflow
 
-/*
- * CUT&RUN Analysis Pipeline
- * Main workflow orchestrator
- */
+nextflow.enable.dsl=2
+
+// Import modules
+include { RUN_BAM_PROCESSING as BAM_PROCESSING } from './modules/bam_processing'
+include { BEDGRAPH_NORMALIZATION } from './modules/bedgraph_normalization'
 
 // Parameters
-params.sample_list = "${projectDir}/samples.txt"
-params.bam_dir = "/home/ec2-user/cutnrun/full_run/bams"
-params.outdir = "${projectDir}/results"
+params.sample_list = 'samples.txt'
+params.bam_dir = '/home/ec2-user/cutnrun/full_run/bams'
+params.norm_factors = 'normalization_factors.tsv'
+params.outdir = 'results'
 
-// Print header
-log.info """\
-    CUT&RUN ANALYSIS PIPELINE
-    =========================
-    sample list    : ${params.sample_list}
-    BAM directory  : ${params.bam_dir}
-    output dir     : ${params.outdir}
-    """
-    .stripIndent()
-
-// Include modules
-include { BAM_PROCESSING } from './modules/bam_processing'
-
-// Main workflow
 workflow {
-    // Create sample channel
-    Channel
+    // Read sample list (just sample IDs, one per line)
+    sample_ch = Channel
         .fromPath(params.sample_list)
         .splitText()
         .map { it.trim() }
-        .map { sample_id -> 
-            def bam_file = file("${params.bam_dir}/${sample_id}.bam")
-            if (!bam_file.exists()) {
-                error "BAM file not found: ${bam_file}"
-            }
-            tuple(sample_id, bam_file)
-        }
-        .set { samples_ch }
+        .map { sample_id -> [sample_id, file("${params.bam_dir}/${sample_id}.bam")] }
     
     // Run BAM processing
-    BAM_PROCESSING(samples_ch)
+    BAM_PROCESSING(sample_ch)
+    
+    // Read normalization factors
+    norm_factors_ch = Channel
+        .fromPath(params.norm_factors)
+        .splitCsv(sep: '\t', header: true)
+        .map { row -> [row.Prefix, row.Factor.toFloat()] }
+    
+    // Run bedgraph normalization
+    BEDGRAPH_NORMALIZATION(
+        BAM_PROCESSING.out.bedgraph,
+        norm_factors_ch
+    )
 }

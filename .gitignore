@@ -29,3 +29,7 @@ __pycache__/
 
 # Results directory
 results/
+test_samples.txt
+
+# Failed publishDir outputs
+null/

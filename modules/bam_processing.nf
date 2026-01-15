@@ -19,12 +19,12 @@ process BAM_PROCESSING {
     tuple val(sample_id), path(bam_file)
     
     output:
-    path "${sample_id}_final.bam", emit: bam
-    path "${sample_id}_final.bam.bai", emit: bai
-    path "${sample_id}_final.clean.bedpe", emit: bedpe
-    path "${sample_id}_final.fragments.bed", emit: fragments
-    path "${sample_id}_final.fragments.sorted.bedgraph", emit: bedgraph
-    path "${sample_id}_run.log", emit: log
+    tuple val(sample_id), path ("${sample_id}_final.bam"), emit: bam
+    tuple val(sample_id), path ("${sample_id}_final.bam.bai"), emit: bai
+    tuple val(sample_id), path ("${sample_id}_final.clean.bedpe"), emit: bedpe
+    tuple val(sample_id), path ("${sample_id}_final.fragments.bed"), emit: fragments
+    tuple val(sample_id), path ("${sample_id}_final.fragments.sorted.bedgraph"), emit: bedgraph
+    tuple val(sample_id), path ("${sample_id}_run.log"), emit: log
     
     script:
     """
@@ -79,7 +79,14 @@ process BAM_PROCESSING {
     """
 }
 
-// Workflow for running this module standalone
-workflow {
-    BAM_PROCESSING(channel.value([params.sample_id, file(params.bam_file)]))
+// Workflow that can be imported by main.nf
+workflow RUN_BAM_PROCESSING {
+    take:
+    sample_ch  // channel: [sample_id, bam_file]
+    
+    main:
+    BAM_PROCESSING(sample_ch)
+    
+    emit:
+    bedgraph = BAM_PROCESSING.out.bedgraph
 }
