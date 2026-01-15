@@ -1,61 +1,105 @@
-# CUT&RUN BAM Processing Pipeline
+# CUT&RUN Analysis Pipeline
 
-Nextflow pipeline for processing paired-end CUT&RUN sequencing data from raw BAM files to fragment coverage tracks.
+Modular Nextflow pipeline for CUT&RUN data analysis from BAM files to peaks.
 
-## Overview
+## Pipeline Overview
+```
+BAMs → [1] Process → [2] QC Stats → [3] Normalize → [4] Call Peaks
+       ✓ Automated   🚧 Coming soon   🚧 Coming soon   🚧 Coming soon
+```
 
-This pipeline processes CUT&RUN BAM files through quality filtering, blacklist removal, and fragment extraction.
+Currently implemented: **BAM Processing Module**
 
-**Processing steps:**
-1. Sort BAM by query name
-2. Filter for high-quality paired reads (MAPQ ≥ 30)
-3. Remove ENCODE blacklisted regions
-4. Remove non-chromosomal reads (chrM, chrUn, random, chrEBV)
-5. Extract fragment coordinates (< 1000 bp)
-6. Generate coverage tracks (bedGraph)
+## Quick Start
+```bash
+# Run BAM processing
+nextflow run main.nf --sample_list samples.txt
+
+# Run in background
+nextflow run main.nf -bg > pipeline.log 2>&1
+
+# Monitor progress
+tail -f pipeline.log
+```
+
+## Modules
+
+### 1. BAM Processing (✓ Complete)
+- Quality filtering (MAPQ ≥ 30)
+- Blacklist removal (ENCODE)
+- Fragment extraction (< 1000 bp)
+- Coverage track generation
+
+**Coming soon:**
+- Spike-in QC
+- Peak calling (SEACR/MACS2)
+- Differential binding analysis
+
+## Input
+
+Text file with one sample name per line (without .bam extension):
+```
+sample1
+sample2
+sample3
+```
+
+BAM files should be in the directory specified by `--bam_dir` (default: `/home/ec2-user/cutnrun/full_run/bams`)
+
+## Output
+
+Results in `results/bam_processing/`:
+- `{sample}_final.bam` - Processed BAM file
+- `{sample}_final.bam.bai` - BAM index
+- `{sample}_final.clean.bedpe` - Filtered paired-end fragments
+- `{sample}_final.fragments.bed` - Fragment coordinates
+- `{sample}_final.fragments.sorted.bedgraph` - Coverage track
+- `{sample}_run.log` - Processing log
+
+## Performance
+
+### Benchmarking
+
+Tested on AWS EC2 m7i.16xlarge (64 CPUs, 247 GB RAM):
+
+| Samples | Parallel Jobs | Wall Time | Time per Sample |
+|---------|---------------|-----------|-----------------|
+| 2       | 2             | 13m 25s   | ~6.5 min        |
+| 72      | 8             | ~60 min*  | ~6.5 min        |
+
+*Estimated based on test run
+
+### Resource Usage
+- CPU: 8 cores per sample
+- Memory: Varies by BAM size
+- Disk: Temporary work files require ~2x input BAM size
+- Parallelization: 8 samples simultaneously (configurable via `maxForks` in config)
 
 ## Requirements
 
 - Nextflow (≥ 21.10.0)
 - samtools (≥ 1.15)
 - bedtools (≥ 2.30)
+- ENCODE blacklist file (included)
+- Genome chromosome sizes file (included)
 
-## Quick Start
-```bash
-# Run pipeline
-nextflow run main.nf
+## Parameters
 
-# Resume if interrupted
-nextflow run main.nf -resume
+- `--sample_list`: Text file with sample names (default: `samples.txt`)
+- `--bam_dir`: Directory containing input BAM files (default: `/home/ec2-user/cutnrun/full_run/bams`)
+- `--outdir`: Output directory (default: `./results`)
 
-# Run in background
-nextflow run main.nf -bg > pipeline.log 2>&1
-```
+## Documentation
 
-## Input
-
-- BAM files in `/home/ec2-user/cutnrun/full_run/bams/`
-- Sample names in `samples.txt`
-- ENCODE blacklist: `ENCFF356LFX.bed.gz`
-- Genome sizes: `GRCh38.p13.chrom.sizes`
-
-## Output
-
-Results in `processed_bams_pe/`:
-- `{sample}_final.bam` - Processed BAM
-- `{sample}_final.bam.bai` - BAM index
-- `{sample}_final.clean.bedpe` - Filtered fragments
-- `{sample}_final.fragments.bed` - Fragment coordinates  
-- `{sample}_final.fragments.sorted.bedgraph` - Coverage track
-- `{sample}_run.log` - Processing log
-
-## Performance
-
-- ~2.5 minutes per sample
-- 18 samples processed in parallel
-- ~3 hours for 72 samples
+- [Usage Guide](docs/usage.md)
+- [Spike-in Normalization](docs/spike_in_normalization.md) (coming soon)
 
 ## Author
 
 Garrett Cooper  
 Emory University
+
+## Citation
+
+If you use this pipeline, please cite:  
+Cooper et al. (2026) *Nature Communications* (in review)

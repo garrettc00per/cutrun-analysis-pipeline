@@ -26,3 +26,6 @@ __pycache__/
 # R
 .Rhistory
 .RData
+
+# Results directory
+results/
