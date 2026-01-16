@@ -33,3 +33,5 @@ test_samples.txt
 
 # Failed publishDir outputs
 null/
+*.backup.nf
+main.backup.nf
