@@ -42,7 +42,7 @@ WT_H3K4me3_R1	2.429385008
 
 **Sample naming convention:** `{genotype}_{antibody}_{replicate}`
 - Example: `WT_H3K27me3_R1`
-- Required for replicate averaging
+- Required for replicate averaging and IgG matching
 
 ## Parameters
 
@@ -67,8 +67,14 @@ results/
 │   └── {sample}_normalized.bedgraph
 ├── baseline_normalized/
 │   └── {sample}_baseline.bedgraph
-└── averaged_bedgraphs/
-    └── {genotype}_{antibody}_averaged.bedgraph
+├── averaged_bedgraphs/
+│   └── {genotype}_{antibody}_averaged.bedgraph
+├── bigwigs_scaled/
+│   └── {sample}_scaled.bw
+├── bigwigs_igg_subtracted/
+│   └── {sample}_IgGsubtracted.bw
+└── bigwigs_averaged/
+    └── {genotype}_{antibody}_avg50bp.bw
 ```
 
 ## Advanced Usage
@@ -93,6 +99,23 @@ rm -rf work/ .nextflow* results/
 rm -rf null/
 ```
 
+## Module Outputs
+
+### BAM Processing
+- Filtered, sorted BAMs ready for downstream analysis
+- Fragment BED files for peak calling
+- BedGraph coverage tracks
+
+### Bedgraph Normalization
+- Spike-in normalized bedGraphs for quantitative comparisons
+- Baseline-corrected bedGraphs for visualization
+- Averaged replicate bedGraphs (R1 + R2)
+
+### BigWig Generation
+- Scaled bigWigs for genome browser visualization
+- IgG-subtracted bigWigs showing true enrichment
+- Averaged bigWigs combining biological replicates
+
 ## Troubleshooting
 
 ### Files Going to `null/` Directory
@@ -103,9 +126,17 @@ rm -rf null/
 - **Cause:** Changed process names
 - **Fix:** Process name changes break cache; re-run without `-resume`
 
-### Normalization Not Running
-- **Cause:** Process outputs not emitted as tuples
-- **Fix:** Ensure `emit: bedgraph = ...` in BAM_PROCESSING workflow
+### BigWig Generation Failing
+- **Cause:** deepTools not installed
+- **Fix:** `conda install -c bioconda deeptools`
+
+### IgG Subtraction Missing Samples
+- **Cause:** Sample naming doesn't match expected format
+- **Fix:** Ensure samples follow `{genotype}_{antibody}_{rep}` format
+
+### Averaged BigWigs Incomplete
+- **Cause:** Missing replicates or IgG subtraction incomplete
+- **Fix:** Verify both R1 and R2 completed IgG subtraction successfully
 
 ## Performance Tips
 
@@ -113,8 +144,19 @@ rm -rf null/
 2. **Don't delete `work/`** unless necessary
 3. **Adjust `maxForks`** in `nextflow.config` based on your CPU count
 4. **Use `stageInMode = 'symlink'`** for large BAM files (already configured)
+5. **BigWig generation is memory-intensive** - monitor with `top` or `htop`
 
-## Running Individual Modules
+## Visualization Workflows
 
-### BAM Processing Only
-Not currently supported - use full pipeline with `-resume` instead.
+### Load in IGV
+```bash
+# BigWigs can be loaded directly into IGV
+# Use bigwigs_igg_subtracted/ for cleanest visualization
+# Use bigwigs_averaged/ for comparing conditions
+```
+
+### Generate Plots
+```bash
+# Coming soon: Built-in plotting module
+# For now, use deepTools or custom R/Python scripts
+```

@@ -4,13 +4,14 @@ Modular Nextflow pipeline for CUT&RUN data analysis from BAM files to peaks.
 
 ## Pipeline Overview
 ```
-BAMs → [1] Process → [2] Normalize → [3] Call Peaks → [4] Diff Binding
-       ✓ Complete    ✓ Complete      🚧 Coming soon   🚧 Coming soon
+BAMs → [1] Process → [2] Normalize → [3] BigWigs → [4] Call Peaks
+       ✓ Complete    ✓ Complete      ✓ Complete   🚧 Coming soon
 ```
 
 **Currently implemented:**
 - ✅ BAM Processing Module
 - ✅ Bedgraph Normalization Module
+- ✅ BigWig Generation Module (with IgG subtraction and replicate averaging)
 
 ## Quick Start
 ```bash
@@ -40,6 +41,11 @@ tail -f pipeline.log
 - Spike-in normalization
 - Baseline correction for visualization
 - Replicate averaging (R1 + R2)
+
+### 3. BigWig Generation (✅ Complete)
+- Scaled bigWig creation with spike-in factors
+- IgG background subtraction
+- Replicate averaging for visualization
 
 **Coming soon:**
 - Automated spike-in alignment (BWA)
@@ -86,6 +92,15 @@ BAM files should be in the directory specified by `--bam_dir` (default: `/home/e
 ### results/averaged_bedgraphs/
 - `{genotype}_{antibody}_averaged.bedgraph` - Averaged replicates
 
+### results/bigwigs_scaled/
+- `{sample}_scaled.bw` - Normalized bigWig files
+
+### results/bigwigs_igg_subtracted/
+- `{sample}_IgGsubtracted.bw` - Background-subtracted bigWig files
+
+### results/bigwigs_averaged/
+- `{genotype}_{antibody}_avg50bp.bw` - Replicate-averaged bigWig files
+
 ## Performance
 
 ### Benchmarking
@@ -96,22 +111,24 @@ Tested on AWS EC2 m7i.16xlarge (64 CPUs, 247 GB RAM):
 |---------|------------------|-------------|--------------------------|
 | 2       | BAM Processing   | 13m 25s     | ~6.5 min per sample      |
 | 2       | Normalization    | <1 min      | Very fast                |
+| 2       | BigWig Gen       | ~2.5 min    | Fast                     |
 | 2       | **Full Pipeline**| **16m 19s** | End-to-end               |
-| 72      | Full Pipeline    | ~70 min*    | Estimated                |
+| 72      | Full Pipeline    | ~4 hours*   | Complete workflow        |
 
-*Estimated based on test runs
+*Actual runtime on full dataset
 
 ### Resource Usage
-- CPU: 8 cores per sample (BAM processing), 1 core (normalization)
-- Memory: Varies by BAM size
+- CPU: 8 cores per sample (BAM processing), 4 cores (BigWig generation), 1 core (normalization)
+- Memory: Varies by BAM size, typically 4-8 GB per sample
 - Disk: Temporary work files require ~2x input BAM size
-- Parallelization: 8 samples simultaneously (configurable via `maxForks` in config)
+- Parallelization: Up to 18 samples simultaneously (configurable via `maxForks` in config)
 
 ## Requirements
 
 - Nextflow (≥ 21.10.0)
 - samtools (≥ 1.15)
 - bedtools (≥ 2.30)
+- deepTools (≥ 3.5.0) - for bamCoverage and bigwigCompare
 - ENCODE blacklist file (included)
 - Genome chromosome sizes file (included)
 
@@ -130,7 +147,7 @@ The pipeline supports Nextflow's `-resume` flag for efficient iteration:
 nextflow run main.nf --sample_list samples.txt
 
 # Modify a module
-nano modules/bedgraph_normalization.nf
+nano modules/bigwig_generation.nf
 
 # Re-run - only changed parts execute
 nextflow run main.nf --sample_list samples.txt -resume
