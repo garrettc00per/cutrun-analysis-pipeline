@@ -5,7 +5,6 @@ nextflow.enable.dsl=2
 // Import modules
 include { RUN_BAM_PROCESSING as BAM_PROCESSING } from './modules/bam_processing'
 include { BEDGRAPH_NORMALIZATION } from './modules/bedgraph_normalization'
-include { BIGWIG_GENERATION } from './modules/bigwig_generation'
 
 // Parameters
 params.sample_list = 'samples.txt'
@@ -33,16 +32,6 @@ workflow {
     // Run bedgraph normalization
     BEDGRAPH_NORMALIZATION(
         BAM_PROCESSING.out.bedgraph,
-        norm_factors_ch
-    )
-    
-    // Combine BAM and BAI for bigwig generation
-    bam_with_bai = BAM_PROCESSING.out.bam
-        .join(BAM_PROCESSING.out.bai)
-    
-    // Run bigwig generation
-    BIGWIG_GENERATION(
-        bam_with_bai,
         norm_factors_ch
     )
 }

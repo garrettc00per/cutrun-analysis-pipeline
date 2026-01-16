@@ -82,11 +82,13 @@ process BAM_PROCESSING {
 // Workflow that can be imported by main.nf
 workflow RUN_BAM_PROCESSING {
     take:
-    sample_ch  // channel: [sample_id, bam_file]
+    sample_ch
     
     main:
     BAM_PROCESSING(sample_ch)
     
     emit:
+    bam = BAM_PROCESSING.out.bam
+    bai = BAM_PROCESSING.out.bai
     bedgraph = BAM_PROCESSING.out.bedgraph
 }
