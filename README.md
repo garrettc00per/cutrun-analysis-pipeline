@@ -20,10 +20,10 @@ BAMs → [1] Process → [2] Normalize → [3] BigWigs → [4] Call Peaks → [5
 ### Full Pipeline (BAMs → Peaks)
 ```bash
 # Run complete pipeline
-nextflow run main.nf
+nextflow run main.nf --sample_list samples.txt
 
 # Run in background
-nextflow run main.nf -bg > pipeline.log 2>&1
+nextflow run main.nf --sample_list samples.txt -bg > pipeline.log 2>&1
 tail -f pipeline.log
 ```
 
@@ -70,28 +70,58 @@ nextflow run workflows/complex_binding.nf \
 
 ## Input
 
-### For Main Pipeline
-
-Normalized bedgraph files in `results/normalized_bedgraphs/` with naming pattern:
+### samples.txt
+Text file with one sample name per line (without .bam extension):
 ```
-{genotype}_{target}_{replicate}_normalized.bedgraph
+I315I_IgG_R1
+I315I_IgG_R2
+I315I_SMARCB1_R1
+I315I_SMARCB1_R2
+WT_IgG_R1
+WT_IgG_R2
+WT_SMARCB1_R1
+WT_SMARCB1_R2
+...
 ```
 
-Example:
+### BAM Files
+Pre-processed alignment files required for each sample:
+- Aligned to reference genome (e.g., GRCh38.p13)
+- Adapter-trimmed
+- PCR duplicates removed
+- Indexed (.bam.bai files present)
+- Located in directory specified by `--bam_dir`
+
+**Sample naming convention:** `{genotype}_{target}_{replicate}`
+- **Genotype**: WT, I315I, I315R, I315X, W281P, W281X
+- **Target**: SMARCB1, SMARCA4, SMARCE1, H3K27me3, H3K4me3, IgG
+- **Replicate**: R1, R2
+
+**Critical:** IgG controls must be present for each genotype/replicate combination for peak calling to work.
+
+### normalization_factors.tsv (optional)
+Tab-separated file with spike-in normalization factors:
 ```
-WT_SMARCB1_R1_normalized.bedgraph
-WT_SMARCB1_R2_normalized.bedgraph
-WT_IgG_R1_normalized.bedgraph
-WT_IgG_R2_normalized.bedgraph
+Prefix	Factor
+WT_IgG_R1	0.520284897
+WT_H3K4me3_R1	2.429385008
+WT_H3K27me3_R1	17.86575146
 ```
 
-### For Consensus Analysis
-
-Overlap BED files from main pipeline in `results/replicate_overlaps/`
+If not provided, pipeline will skip spike-in normalization step.
 
 ## Output
 
 ### Main Pipeline Outputs
+
+#### results/bam_processing/
+- `{sample}_final.bam` - Processed BAM file
+- `{sample}_final.bam.bai` - BAM index
+- `{sample}_final.fragments.bed` - Fragment coordinates
+- `{sample}_final.fragments.sorted.bedgraph` - Coverage track
+
+#### results/normalized_bedgraphs/
+- `{sample}_normalized.bedgraph` - Spike-in normalized coverage
 
 #### results/seacr_peaks/
 - `{sample}_SEACR_peaks.stringent.bed` - Raw SEACR peak calls
@@ -197,9 +227,10 @@ Tested on AWS EC2 m7i.16xlarge (64 CPUs, 247 GB RAM):
 | -       | Consensus Analysis  | <5 min         | Post-processing          |
 
 ### Resource Usage
+- **BAM Processing**: 8 CPUs per sample, 4-8 GB memory
 - **Peak Calling**: 2 CPUs per sample, 4 GB memory
 - **Parallelization**: Up to 18 samples simultaneously (configurable)
-- **Storage**: Intermediate files in `work/` directory (automatically cleaned)
+- **Storage**: Intermediate files in `work/` directory (automatically cleaned with `-resume`)
 
 ## Requirements
 
@@ -214,7 +245,9 @@ Tested on AWS EC2 m7i.16xlarge (64 CPUs, 247 GB RAM):
 ## Parameters
 
 ### Main Pipeline
-- `--bedgraph_dir`: Input bedgraph directory (default: `results/normalized_bedgraphs`)
+- `--sample_list`: List of sample names (default: `samples.txt`)
+- `--bam_dir`: Directory containing BAM files (default: `/home/ec2-user/cutnrun/full_run/bams`)
+- `--norm_factors`: Spike-in normalization factors (default: `normalization_factors.tsv`)
 - `--outdir`: Output directory (default: `results`)
 - `--seacr_script`: Path to SEACR script (default: `${projectDir}/SEACR_1.3.sh`)
 - `--test_mode`: Test with WT samples only (default: `false`)
@@ -251,13 +284,13 @@ cutrun-analysis-pipeline/
 The pipeline supports Nextflow's `-resume` flag for efficient iteration:
 ```bash
 # First run
-nextflow run main.nf
+nextflow run main.nf --sample_list samples.txt
 
 # Modify a module
 nano modules/peak_calling.nf
 
 # Re-run - only changed parts execute
-nextflow run main.nf -resume
+nextflow run main.nf --sample_list samples.txt -resume
 ```
 
 ## Documentation
