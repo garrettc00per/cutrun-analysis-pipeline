@@ -2,18 +2,14 @@
 
 ## Basic Usage
 
-### Full Pipeline
+### Full Pipeline (BAMs → Peaks)
 ```bash
-nextflow run main.nf --sample_list samples.txt
+nextflow run main.nf
 ```
 
-### With Custom Parameters
+### Test Mode (WT samples only)
 ```bash
-nextflow run main.nf \
-  --sample_list my_samples.txt \
-  --bam_dir /path/to/bams \
-  --norm_factors my_normalization_factors.tsv \
-  --outdir my_results
+nextflow run main.nf --test_mode true
 ```
 
 ### Background Execution
@@ -22,141 +18,420 @@ nextflow run main.nf -bg > pipeline.log 2>&1
 tail -f pipeline.log  # Monitor progress
 ```
 
-## Input File Formats
-
-### samples.txt
-One sample name per line (no .bam extension):
-```
-WT_IgG_R1
-WT_H3K4me3_R1
-WT_H3K27me3_R1
+### Consensus Binding Analysis (Optional)
+```bash
+# After main pipeline completes
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge SMARCA4,SMARCB1,SMARCE1
 ```
 
-### normalization_factors.tsv
-Tab-separated with header:
+## Input Requirements
+
+### Main Pipeline
+
+Normalized bedgraph files in `results/normalized_bedgraphs/` with naming pattern:
 ```
-Prefix	Factor
-WT_IgG_R1	0.520284897
-WT_H3K4me3_R1	2.429385008
+{genotype}_{target}_{replicate}_normalized.bedgraph
 ```
 
-**Sample naming convention:** `{genotype}_{antibody}_{replicate}`
-- Example: `WT_H3K27me3_R1`
-- Required for replicate averaging and IgG matching
+Examples:
+```
+WT_SMARCB1_R1_normalized.bedgraph
+WT_SMARCB1_R2_normalized.bedgraph
+WT_IgG_R1_normalized.bedgraph
+WT_IgG_R2_normalized.bedgraph
+I315I_H3K27me3_R1_normalized.bedgraph
+I315I_H3K27me3_R2_normalized.bedgraph
+```
+
+**Naming convention:** `{genotype}_{target}_{replicate}`
+- **Genotype**: WT, I315I, W281P, etc.
+- **Target**: SMARCB1, H3K27me3, IgG, etc.
+- **Replicate**: R1, R2
+
+**Important:** IgG controls must be present for each genotype/replicate combination.
+
+### Consensus Analysis
+
+Replicate overlap BED files from main pipeline in `results/replicate_overlaps/`
 
 ## Parameters
 
-| Parameter       | Default                                     | Description                          |
-|-----------------|---------------------------------------------|--------------------------------------|
-| `--sample_list` | `samples.txt`                               | List of sample names                 |
-| `--bam_dir`     | `/home/ec2-user/cutnrun/full_run/bams`      | Directory with BAM files             |
-| `--norm_factors`| `normalization_factors.tsv`                 | Spike-in normalization factors       |
-| `--outdir`      | `results`                                   | Output directory                     |
+### Main Pipeline Parameters
+
+| Parameter           | Default                                          | Description                           |
+|---------------------|--------------------------------------------------|---------------------------------------|
+| `--bedgraph_dir`    | `${projectDir}/results/normalized_bedgraphs`     | Input bedgraph directory              |
+| `--outdir`          | `results`                                        | Output directory                      |
+| `--seacr_script`    | `${projectDir}/SEACR_1.3.sh`                     | Path to SEACR script                  |
+| `--test_mode`       | `false`                                          | Run with WT samples only              |
+| `--filter_method`   | `hybrid`                                         | Peak filtering strategy               |
+| `--fixed_threshold` | `5.0`                                            | Minimum peak intensity                |
+| `--snr_multiplier`  | `2.0`                                            | SNR threshold multiplier              |
+
+### Consensus Analysis Parameters
+
+| Parameter            | Default                           | Description                          |
+|----------------------|-----------------------------------|--------------------------------------|
+| `--overlap_dir`      | `results/replicate_overlaps`      | Input overlap BED directory          |
+| `--output_dir`       | `results/complex_binding`         | Output directory                     |
+| `--genotypes`        | `WT,I315I`                        | Comma-separated genotypes            |
+| `--targets_to_merge` | `SMARCA4,SMARCB1,SMARCE1`         | Comma-separated targets              |
+| `--merge_distance`   | `100`                             | Distance for merging peaks (bp)      |
+
+## Peak Filtering Strategies
+
+The pipeline offers three filtering methods:
+
+### 1. Hybrid (Recommended - Default)
+```bash
+nextflow run main.nf --filter_method hybrid
+```
+Uses `max(SNR threshold, fixed threshold)`:
+- Adapts to IgG quality (uses higher SNR if IgG is noisy)
+- Protects against biological negatives (enforces minimum threshold)
+- Best for diverse datasets with varying IgG quality
+
+### 2. Signal-to-Noise Ratio (SNR) Only
+```bash
+nextflow run main.nf --filter_method snr --snr_multiplier 3.0
+```
+Uses only `mean(IgG) + N×SD(IgG)`:
+- Purely statistical approach
+- Adapts to each sample's IgG background
+- May be too lenient for clean IgG controls
+
+### 3. Fixed Threshold Only
+```bash
+nextflow run main.nf --filter_method fixed --fixed_threshold 10.0
+```
+Uses only a fixed intensity cutoff:
+- Simple, consistent threshold
+- Doesn't account for IgG quality
+- Good for well-controlled experiments
 
 ## Output Structure
 ```
 results/
-├── bam_processing/
-│   ├── {sample}_final.bam
-│   ├── {sample}_final.bam.bai
-│   ├── {sample}_final.clean.bedpe
-│   ├── {sample}_final.fragments.bed
-│   ├── {sample}_final.fragments.sorted.bedgraph
-│   └── {sample}_run.log
-├── normalized_bedgraphs/
-│   └── {sample}_normalized.bedgraph
-├── baseline_normalized/
-│   └── {sample}_baseline.bedgraph
-├── averaged_bedgraphs/
-│   └── {genotype}_{antibody}_averaged.bedgraph
-├── bigwigs_scaled/
-│   └── {sample}_scaled.bw
-├── bigwigs_igg_subtracted/
-│   └── {sample}_IgGsubtracted.bw
-└── bigwigs_averaged/
-    └── {genotype}_{antibody}_avg50bp.bw
+├── seacr_peaks/
+│   └── {sample}_SEACR_peaks.stringent.bed
+├── filtered_peaks/
+│   ├── {sample}_filtered.bed
+│   └── {sample}_filter_summary.txt
+├── peak_summary/
+│   └── peak_calling_summary.txt
+├── replicate_overlaps/
+│   ├── {genotype}_{target}_R1_vs_R2_overlap.bed
+│   ├── {genotype}_{target}_overlap_stats.txt
+│   └── replicate_overlap_summary.txt
+└── complex_binding/                          # From consensus analysis
+    ├── reproducible_peaks/
+    │   └── {genotype}_{target}_reproducible_peaks.bed
+    ├── unified_regions/
+    │   └── {genotype}_unified_regions.bed
+    ├── consensus_binding_regions.bed
+    └── consensus_stats.txt
+```
+
+## Module Outputs
+
+### Peak Calling Module
+
+**SEACR Peaks** (`seacr_peaks/`)
+- Raw peak calls using stringent mode with IgG controls
+- Format: BED file with peak coordinates and max intensity
+
+**Filtered Peaks** (`filtered_peaks/`)
+- Peaks passing hybrid/SNR/fixed threshold
+- Per-sample filtering summaries showing original vs filtered counts
+
+**Peak Summary** (`peak_summary/`)
+- Complete table of all samples with:
+  - Original peak count
+  - Filtered peak count
+  - Percent retained
+  - SNR threshold
+  - Fixed threshold
+  - Applied threshold
+  - Filter method used
+
+**Replicate Overlaps** (`replicate_overlaps/`)
+- Peaks found in both R1 and R2
+- Overlap statistics (counts and percentages)
+- Summary table for all conditions
+
+### Consensus Binding Analysis
+
+**Reproducible Peaks** (`reproducible_peaks/`)
+- Union of overlapping R1 and R2 peaks per condition
+- High-confidence peaks for downstream analysis
+
+**Unified Regions** (`unified_regions/`)
+- Merged peaks across specified targets (e.g., SWI/SNF subunits)
+- Represents regions bound by any of the merged targets
+
+**Consensus Regions** (main output)
+- Final consensus peaks found across all specified genotypes
+- Represents high-confidence binding sites common to all conditions
+
+## Usage Examples
+
+### Example 1: Standard Run (All Samples)
+```bash
+# Run peak calling on all samples
+nextflow run main.nf
+
+# Check results
+cat results/peak_summary/peak_calling_summary.txt
+cat results/replicate_overlaps/replicate_overlap_summary.txt
+```
+
+### Example 2: Test with WT Only
+```bash
+# Quick test with just WT samples
+nextflow run main.nf --test_mode true
+
+# Verify outputs
+ls results/filtered_peaks/WT_*
+```
+
+### Example 3: Custom Filtering
+```bash
+# Use more stringent SNR filtering
+nextflow run main.nf \
+  --filter_method snr \
+  --snr_multiplier 3.0
+
+# Or use higher fixed threshold
+nextflow run main.nf \
+  --filter_method fixed \
+  --fixed_threshold 10.0
+```
+
+### Example 4: SWI/SNF Complex Analysis
+```bash
+# First run main pipeline
+nextflow run main.nf
+
+# Then analyze SWI/SNF complex binding
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge SMARCA4,SMARCB1,SMARCE1
+
+# Check output
+wc -l results/complex_binding/consensus_binding_regions.bed
+cat results/complex_binding/consensus_stats.txt
+```
+
+### Example 5: Compare Mutants
+```bash
+# Analyze SMARCB1 binding in different mutants
+nextflow run workflows/complex_binding.nf \
+  --genotypes W281P,W281X,I315X \
+  --targets_to_merge SMARCB1 \
+  --output_dir results/smarcb1_mutant_comparison
+```
+
+### Example 6: Histone Mark Co-localization
+```bash
+# Find regions with both H3K27me3 and H3K4me3
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge H3K27me3,H3K4me3 \
+  --merge_distance 500 \
+  --output_dir results/bivalent_chromatin
+```
+
+### Example 7: Single Subunit Analysis
+```bash
+# Just analyze SMARCA4 across two genotypes
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315R \
+  --targets_to_merge SMARCA4 \
+  --output_dir results/smarca4_wt_vs_i315r
 ```
 
 ## Advanced Usage
 
 ### Resume After Failure
 ```bash
-nextflow run main.nf --sample_list samples.txt -resume
+nextflow run main.nf -resume
 ```
+Only re-runs failed or incomplete processes.
 
-### Test with Subset
+### Clean Up Between Runs
 ```bash
-head -2 samples.txt > test_samples.txt
-nextflow run main.nf --sample_list test_samples.txt
+# Remove work files and start fresh
+rm -rf work/ .nextflow*
+
+# Remove specific output directories
+rm -rf results/seacr_peaks results/filtered_peaks
 ```
 
-### Clean Up
+### Check Pipeline Progress
 ```bash
-# Remove cache and results
-rm -rf work/ .nextflow* results/
+# View real-time logs
+tail -f .nextflow.log
 
-# Remove only bad outputs (keep cache)
-rm -rf null/
+# Monitor resource usage
+htop  # or top
+
+# Check completed processes
+nextflow log
 ```
 
-## Module Outputs
+### Generate Execution Reports
+```bash
+nextflow run main.nf \
+  -with-report report.html \
+  -with-timeline timeline.html \
+  -with-dag flowchart.png
+```
 
-### BAM Processing
-- Filtered, sorted BAMs ready for downstream analysis
-- Fragment BED files for peak calling
-- BedGraph coverage tracks
+## Quality Control
 
-### Bedgraph Normalization
-- Spike-in normalized bedGraphs for quantitative comparisons
-- Baseline-corrected bedGraphs for visualization
-- Averaged replicate bedGraphs (R1 + R2)
+### Inspect IgG Statistics
+```bash
+# Check IgG background levels
+grep "IgG stats" .nextflow.log
 
-### BigWig Generation
-- Scaled bigWigs for genome browser visualization
-- IgG-subtracted bigWigs showing true enrichment
-- Averaged bigWigs combining biological replicates
+# View individual sample thresholds
+cat results/filtered_peaks/*_filter_summary.txt
+```
+
+### Assess Replicate Concordance
+```bash
+# View overlap summary
+column -t results/replicate_overlaps/replicate_overlap_summary.txt
+
+# Flag poor replicates (< 50% overlap)
+awk -F'\t' 'NR>1 && ($6<50 || $7<50)' \
+  results/replicate_overlaps/replicate_overlap_summary.txt
+```
+
+### Check Peak Counts
+```bash
+# Count peaks per sample
+wc -l results/filtered_peaks/*.bed
+
+# Identify outliers (very few or very many peaks)
+for f in results/filtered_peaks/*_filtered.bed; do
+  echo "$(wc -l < "$f") $f"
+done | sort -n
+```
 
 ## Troubleshooting
 
-### Files Going to `null/` Directory
-- **Cause:** Missing `params.outdir` in module
-- **Fix:** Ensure each module has `params.outdir = 'results'` at top
+### No Peaks Called
+**Symptoms:** Empty or very few peaks in output files
 
-### Pipeline Not Resuming
-- **Cause:** Changed process names
-- **Fix:** Process name changes break cache; re-run without `-resume`
+**Possible causes:**
+1. IgG controls missing or incorrectly named
+2. Threshold too stringent
+3. Poor data quality
 
-### BigWig Generation Failing
-- **Cause:** deepTools not installed
-- **Fix:** `conda install -c bioconda deeptools`
+**Solutions:**
+```bash
+# Check IgG files exist
+ls results/normalized_bedgraphs/*IgG*
 
-### IgG Subtraction Missing Samples
-- **Cause:** Sample naming doesn't match expected format
-- **Fix:** Ensure samples follow `{genotype}_{antibody}_{rep}` format
+# Try more lenient filtering
+nextflow run main.nf --filter_method fixed --fixed_threshold 2.0
 
-### Averaged BigWigs Incomplete
-- **Cause:** Missing replicates or IgG subtraction incomplete
-- **Fix:** Verify both R1 and R2 completed IgG subtraction successfully
+# Check individual sample quality
+cat results/filtered_peaks/{sample}_filter_summary.txt
+```
+
+### Poor Replicate Overlap
+**Symptoms:** Low overlap percentages in `replicate_overlap_summary.txt`
+
+**Possible causes:**
+1. Technical variation between replicates
+2. Low sequencing depth
+3. Threshold too stringent
+
+**Solutions:**
+- Inspect raw SEACR calls: `wc -l results/seacr_peaks/*.bed`
+- Lower filtering threshold
+- Check if issue is specific to certain samples/antibodies
+
+### Consensus Analysis Finds No Peaks
+**Symptoms:** Empty or very small `consensus_binding_regions.bed`
+
+**Possible causes:**
+1. Genotypes have very different binding patterns
+2. Wrong targets specified
+3. Merge distance too small
+
+**Solutions:**
+```bash
+# Check individual genotype unified regions
+wc -l results/complex_binding/unified_regions/*.bed
+
+# Try larger merge distance
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge SMARCA4,SMARCB1,SMARCE1 \
+  --merge_distance 500
+```
+
+### Pipeline Crashes or Stalls
+**Possible causes:**
+1. Insufficient memory
+2. Missing dependencies
+3. Corrupt input files
+
+**Solutions:**
+```bash
+# Check system resources
+free -h
+df -h
+
+# Verify SEACR is accessible
+bash SEACR_1.3.sh --help
+
+# Test with small subset
+nextflow run main.nf --test_mode true
+```
 
 ## Performance Tips
 
-1. **Use `-resume`** when iterating on modules
-2. **Don't delete `work/`** unless necessary
-3. **Adjust `maxForks`** in `nextflow.config` based on your CPU count
-4. **Use `stageInMode = 'symlink'`** for large BAM files (already configured)
-5. **BigWig generation is memory-intensive** - monitor with `top` or `htop`
+1. **Use `-resume`** when iterating - saves hours on large datasets
+2. **Adjust `maxForks`** in config based on available CPUs
+3. **Clean `work/` periodically** to save disk space
+4. **Monitor memory usage** during peak calling
+5. **Run test mode first** to validate settings before full run
 
-## Visualization Workflows
+## Downstream Analysis
 
-### Load in IGV
+### Load Peaks in IGV
 ```bash
-# BigWigs can be loaded directly into IGV
-# Use bigwigs_igg_subtracted/ for cleanest visualization
-# Use bigwigs_averaged/ for comparing conditions
+# Filtered peaks are ready for IGV
+# Load: results/filtered_peaks/{sample}_filtered.bed
+
+# For cleaner visualization, use reproducible peaks
+# Load: results/complex_binding/reproducible_peaks/*.bed
 ```
 
-### Generate Plots
+### Differential Binding Analysis
 ```bash
-# Coming soon: Built-in plotting module
-# For now, use deepTools or custom R/Python scripts
+# Coming soon: DiffBind module
+# For now, export filtered peaks for external tools
+```
+
+### Motif Analysis
+```bash
+# Extract FASTA sequences from consensus regions
+bedtools getfasta -fi genome.fa \
+  -bed results/complex_binding/consensus_binding_regions.bed \
+  -fo consensus_sequences.fa
+
+# Run MEME, HOMER, or other motif tools
+```
+
+### Annotation
+```bash
+# Annotate peaks with nearest genes
+# Use ChIPseeker, HOMER, or bedtools closest
 ```

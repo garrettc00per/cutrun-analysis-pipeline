@@ -1,48 +1,40 @@
-#!/usr/bin/env nextflow
+// main.nf
 
 nextflow.enable.dsl=2
 
 // Import modules
-include { RUN_BAM_PROCESSING as BAM_PROCESSING } from './modules/bam_processing'
-include { BEDGRAPH_NORMALIZATION } from './modules/bedgraph_normalization'
-include { BIGWIG_GENERATION } from './modules/bigwig_generation'
+include { PEAK_CALLING } from './modules/peak_calling'
 
-// Parameters
-params.sample_list = 'samples.txt'
-params.bam_dir = '/home/ec2-user/cutnrun/full_run/bams'
-params.norm_factors = 'normalization_factors.tsv'
+// Default params (can be overridden by config or command line)
+params.bedgraph_dir = "${projectDir}/results/normalized_bedgraphs"
 params.outdir = 'results'
+params.seacr_script = "${projectDir}/SEACR_1.3.sh"
+params.test_mode = false
 
 workflow {
-    // Read sample list (just sample IDs, one per line)
-    sample_ch = Channel
-        .fromPath(params.sample_list)
-        .splitText()
-        .map { it.trim() }
-        .map { sample_id -> [sample_id, file("${params.bam_dir}/${sample_id}.bam")] }
+    // Load all normalized bedgraphs
+    Channel
+        .fromPath("${params.bedgraph_dir}/*_normalized.bedgraph")
+        .map { file ->
+            def filename = file.name
+            // Parse: WT_SMARCB1_R1_normalized.bedgraph
+            def parts = filename.replace('_normalized.bedgraph', '').tokenize('_')
+            def genotype = parts[0]
+            def target = parts[1]
+            def replicate = parts[2]
+            def sample_id = "${genotype}_${target}_${replicate}"
+            [sample_id, genotype, target, replicate, file]
+        }
+        .filter { params.test_mode ? it[1] == 'WT' : true }  // WT only in test mode
+        .set { bedgraph_ch }
     
-    // Run BAM processing
-    BAM_PROCESSING(sample_ch)
+    // Debug: see what we're loading
+    bedgraph_ch.view { "Loading: ${it[0]}" }
     
-    // Read normalization factors
-    norm_factors_ch = Channel
-        .fromPath(params.norm_factors)
-        .splitCsv(sep: '\t', header: true)
-        .map { row -> [row.Prefix, row.Factor.toFloat()] }
+    // Run peak calling
+    PEAK_CALLING(bedgraph_ch)
     
-    // Run bedgraph normalization
-    BEDGRAPH_NORMALIZATION(
-        BAM_PROCESSING.out.bedgraph,
-        norm_factors_ch
-    )
-    
-    // Combine BAM and BAI for bigwig generation
-    bam_with_bai = BAM_PROCESSING.out.bam
-        .join(BAM_PROCESSING.out.bai)
-    
-    // Run bigwig generation
-    BIGWIG_GENERATION(
-        bam_with_bai,
-        norm_factors_ch
-    )
+    // View summaries
+    PEAK_CALLING.out.filter_summary.view()
+    PEAK_CALLING.out.overlap_summary.view()
 }

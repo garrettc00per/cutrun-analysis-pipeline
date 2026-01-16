@@ -1,37 +1,55 @@
-# Nextflow work directories
+# Nextflow
 work/
 .nextflow*
+*.log
+timeline.html
+report.html
+flowchart.png
+pipeline.log
 
-# Large data files
+# Results (don't commit large output files)
+results/
+null/
+
+# BAM files
 *.bam
 *.bam.bai
-*.fastq.gz
-*.bed.gz
+*.bai
 
-# Results directories
-processed_bams_pe/
-results/
+# BigWig files
+*.bw
+*.bigwig
 
-# Logs
-*.log
-nohup.out
+# BedGraph files (unless small)
+*.bedgraph
 
-# HTML reports
-*.html
+# Compressed files
+*.gz
+
+# Test files
+test_samples.txt
+test_*.txt
 
 # Python
 __pycache__/
 *.pyc
+*.pyo
 
 # R
 .Rhistory
 .RData
 
-# Results directory
-results/
-test_samples.txt
+# OS files
+.DS_Store
+Thumbs.db
 
-# Failed publishDir outputs
-null/
-*.backup.nf
-main.backup.nf
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+temp/
+tmp/

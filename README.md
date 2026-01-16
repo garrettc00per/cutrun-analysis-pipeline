@@ -1,32 +1,38 @@
 # CUT&RUN Analysis Pipeline
 
-Modular Nextflow pipeline for CUT&RUN data analysis from BAM files to peaks.
+Modular Nextflow pipeline for CUT&RUN data analysis from BAM files through peak calling and consensus peak analysis.
 
 ## Pipeline Overview
 ```
-BAMs → [1] Process → [2] Normalize → [3] BigWigs → [4] Call Peaks
-       ✓ Complete    ✓ Complete      ✓ Complete   🚧 Coming soon
+BAMs → [1] Process → [2] Normalize → [3] BigWigs → [4] Call Peaks → [5] Consensus Analysis
+       ✓ Complete    ✓ Complete      ✓ Complete   ✓ Complete      ✓ Complete
 ```
 
-**Currently implemented:**
+**Implemented:**
 - ✅ BAM Processing Module
 - ✅ Bedgraph Normalization Module
 - ✅ BigWig Generation Module (with IgG subtraction and replicate averaging)
+- ✅ Peak Calling Module (SEACR with adaptive filtering and replicate overlap)
+- ✅ Consensus Binding Analysis Workflow (optional, project-specific)
 
 ## Quick Start
-```bash
-# Prepare input files
-# 1. samples.txt - one sample name per line
-# 2. normalization_factors.tsv - spike-in normalization factors
 
-# Run full pipeline
-nextflow run main.nf --sample_list samples.txt
+### Full Pipeline (BAMs → Peaks)
+```bash
+# Run complete pipeline
+nextflow run main.nf
 
 # Run in background
 nextflow run main.nf -bg > pipeline.log 2>&1
-
-# Monitor progress
 tail -f pipeline.log
+```
+
+### Consensus Binding Analysis (optional)
+```bash
+# After main pipeline completes, create consensus peaks
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge SMARCA4,SMARCB1,SMARCE1
 ```
 
 ## Modules
@@ -47,59 +53,133 @@ tail -f pipeline.log
 - IgG background subtraction
 - Replicate averaging for visualization
 
-**Coming soon:**
-- Automated spike-in alignment (BWA)
-- Peak calling (SEACR)
-- Differential binding analysis (DiffBind)
+### 4. Peak Calling (✅ Complete)
+- SEACR peak calling with IgG controls
+- Adaptive filtering:
+  - Signal-to-noise ratio (SNR) calculation from IgG
+  - Hybrid threshold (max of SNR or fixed threshold)
+  - Configurable filtering strategy
+- Replicate overlap analysis
+- Quality metrics and summary reports
+
+### 5. Consensus Binding Analysis (✅ Optional Workflow)
+- Create reproducible peaks from replicate overlaps
+- Merge multiple targets (e.g., protein complex subunits)
+- Generate consensus regions across genotypes
+- Fully customizable for different biological questions
 
 ## Input
 
-### samples.txt
-Text file with one sample name per line (without .bam extension):
+### For Main Pipeline
+
+Normalized bedgraph files in `results/normalized_bedgraphs/` with naming pattern:
 ```
-WT_IgG_R1
-WT_H3K4me3_R1
-WT_H3K27me3_R1
+{genotype}_{target}_{replicate}_normalized.bedgraph
 ```
 
-### normalization_factors.tsv
-Tab-separated file with spike-in normalization factors:
+Example:
 ```
-Prefix	Factor
-WT_IgG_R1	0.520284897
-WT_H3K4me3_R1	2.429385008
-WT_H3K27me3_R1	17.86575146
+WT_SMARCB1_R1_normalized.bedgraph
+WT_SMARCB1_R2_normalized.bedgraph
+WT_IgG_R1_normalized.bedgraph
+WT_IgG_R2_normalized.bedgraph
 ```
 
-BAM files should be in the directory specified by `--bam_dir` (default: `/home/ec2-user/cutnrun/full_run/bams`)
+### For Consensus Analysis
+
+Overlap BED files from main pipeline in `results/replicate_overlaps/`
 
 ## Output
 
-### results/bam_processing/
-- `{sample}_final.bam` - Processed BAM file
-- `{sample}_final.bam.bai` - BAM index
-- `{sample}_final.clean.bedpe` - Filtered paired-end fragments
-- `{sample}_final.fragments.bed` - Fragment coordinates
-- `{sample}_final.fragments.sorted.bedgraph` - Coverage track
-- `{sample}_run.log` - Processing log
+### Main Pipeline Outputs
 
-### results/normalized_bedgraphs/
-- `{sample}_normalized.bedgraph` - Spike-in normalized coverage
+#### results/seacr_peaks/
+- `{sample}_SEACR_peaks.stringent.bed` - Raw SEACR peak calls
 
-### results/baseline_normalized/
-- `{sample}_baseline.bedgraph` - Baseline-corrected for visualization
+#### results/filtered_peaks/
+- `{sample}_filtered.bed` - Filtered peaks (hybrid threshold applied)
+- `{sample}_filter_summary.txt` - Filtering statistics per sample
 
-### results/averaged_bedgraphs/
-- `{genotype}_{antibody}_averaged.bedgraph` - Averaged replicates
+#### results/peak_summary/
+- `peak_calling_summary.txt` - Complete filtering summary for all samples
 
-### results/bigwigs_scaled/
-- `{sample}_scaled.bw` - Normalized bigWig files
+#### results/replicate_overlaps/
+- `{genotype}_{target}_R1_vs_R2_overlap.bed` - Overlapping peaks between replicates
+- `{genotype}_{target}_overlap_stats.txt` - Overlap statistics per condition
+- `replicate_overlap_summary.txt` - Summary table of all overlaps
 
-### results/bigwigs_igg_subtracted/
-- `{sample}_IgGsubtracted.bw` - Background-subtracted bigWig files
+### Consensus Analysis Outputs
 
-### results/bigwigs_averaged/
-- `{genotype}_{antibody}_avg50bp.bw` - Replicate-averaged bigWig files
+#### results/complex_binding/reproducible_peaks/
+- `{genotype}_{target}_reproducible_peaks.bed` - Peaks found in both replicates
+
+#### results/complex_binding/unified_regions/
+- `{genotype}_unified_regions.bed` - Merged peaks across specified targets
+
+#### results/complex_binding/
+- `consensus_binding_regions.bed` - Final consensus peaks across genotypes
+- `consensus_stats.txt` - Analysis summary with statistics
+
+## Peak Calling Configuration
+
+### Filtering Strategies
+
+The pipeline uses a **hybrid filtering approach** by default:
+```groovy
+params {
+    filter_method = 'hybrid'        // Options: 'snr', 'fixed', 'hybrid'
+    fixed_threshold = 5.0           // Minimum peak intensity
+    snr_multiplier = 2.0            // SD multiplier for SNR method
+}
+```
+
+**Filter Methods:**
+- `snr`: Use only signal-to-noise (mean + 2×SD from IgG)
+- `fixed`: Use only fixed threshold (5.0 by default)
+- `hybrid`: Use max(SNR threshold, fixed threshold) - **recommended**
+
+### Why Hybrid?
+
+The hybrid approach:
+- Protects against noisy IgG controls (high SNR kicks in)
+- Protects against biological negatives (fixed threshold kicks in)
+- Validated on nonsense mutants with no functional protein
+
+## Consensus Analysis Examples
+
+### SWI/SNF Complex Binding
+```bash
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge SMARCA4,SMARCB1,SMARCE1
+```
+
+### Compare Mutants for Single Protein
+```bash
+nextflow run workflows/complex_binding.nf \
+  --genotypes W281P,W281X \
+  --targets_to_merge SMARCB1 \
+  --output_dir results/smarcb1_mutants
+```
+
+### Histone Mark Co-occurrence
+```bash
+nextflow run workflows/complex_binding.nf \
+  --genotypes WT,I315I \
+  --targets_to_merge H3K27me3,H3K4me3 \
+  --merge_distance 500 \
+  --output_dir results/histone_marks
+```
+
+### Custom Analysis
+```bash
+nextflow run workflows/complex_binding.nf \
+  --overlap_dir results/replicate_overlaps \
+  --output_dir results/my_custom_analysis \
+  --genotypes WT,I315R,I315X \
+  --targets_to_merge SMARCA4,SMARCE1 \
+  --merge_distance 150
+```
 
 ## Performance
 
@@ -107,50 +187,77 @@ BAM files should be in the directory specified by `--bam_dir` (default: `/home/e
 
 Tested on AWS EC2 m7i.16xlarge (64 CPUs, 247 GB RAM):
 
-| Samples | Module           | Wall Time   | Notes                    |
-|---------|------------------|-------------|--------------------------|
-| 2       | BAM Processing   | 13m 25s     | ~6.5 min per sample      |
-| 2       | Normalization    | <1 min      | Very fast                |
-| 2       | BigWig Gen       | ~2.5 min    | Fast                     |
-| 2       | **Full Pipeline**| **16m 19s** | End-to-end               |
-| 72      | Full Pipeline    | ~4 hours*   | Complete workflow        |
-
-*Actual runtime on full dataset
+| Samples | Module              | Wall Time      | Notes                    |
+|---------|---------------------|----------------|--------------------------|
+| 2       | BAM Processing      | 13m 25s        | ~6.5 min per sample      |
+| 2       | Normalization       | <1 min         | Very fast                |
+| 2       | BigWig Gen          | ~2.5 min       | Fast                     |
+| 60      | Peak Calling        | ~45 min        | SEACR + filtering        |
+| 72      | **Full Pipeline**   | **~5 hours**   | End-to-end               |
+| -       | Consensus Analysis  | <5 min         | Post-processing          |
 
 ### Resource Usage
-- CPU: 8 cores per sample (BAM processing), 4 cores (BigWig generation), 1 core (normalization)
-- Memory: Varies by BAM size, typically 4-8 GB per sample
-- Disk: Temporary work files require ~2x input BAM size
-- Parallelization: Up to 18 samples simultaneously (configurable via `maxForks` in config)
+- **Peak Calling**: 2 CPUs per sample, 4 GB memory
+- **Parallelization**: Up to 18 samples simultaneously (configurable)
+- **Storage**: Intermediate files in `work/` directory (automatically cleaned)
 
 ## Requirements
 
 - Nextflow (≥ 21.10.0)
 - samtools (≥ 1.15)
 - bedtools (≥ 2.30)
-- deepTools (≥ 3.5.0) - for bamCoverage and bigwigCompare
+- deepTools (≥ 3.5.0)
+- SEACR (v1.3)
 - ENCODE blacklist file (included)
 - Genome chromosome sizes file (included)
 
 ## Parameters
 
-- `--sample_list`: Text file with sample names (default: `samples.txt`)
-- `--bam_dir`: Directory containing input BAM files (default: `/home/ec2-user/cutnrun/full_run/bams`)
-- `--norm_factors`: Normalization factors file (default: `normalization_factors.tsv`)
-- `--outdir`: Output directory (default: `./results`)
+### Main Pipeline
+- `--bedgraph_dir`: Input bedgraph directory (default: `results/normalized_bedgraphs`)
+- `--outdir`: Output directory (default: `results`)
+- `--seacr_script`: Path to SEACR script (default: `${projectDir}/SEACR_1.3.sh`)
+- `--test_mode`: Test with WT samples only (default: `false`)
+- `--filter_method`: Peak filtering strategy (default: `hybrid`)
+- `--fixed_threshold`: Minimum peak intensity (default: `5.0`)
+- `--snr_multiplier`: SNR threshold multiplier (default: `2.0`)
+
+### Consensus Analysis
+- `--overlap_dir`: Overlap BED directory (default: `results/replicate_overlaps`)
+- `--output_dir`: Output directory (default: `results/complex_binding`)
+- `--genotypes`: Comma-separated genotypes (default: `WT,I315I`)
+- `--targets_to_merge`: Comma-separated targets (default: `SMARCA4,SMARCB1,SMARCE1`)
+- `--merge_distance`: Distance for merging peaks (default: `100`)
+
+## Pipeline Architecture
+```
+cutrun-analysis-pipeline/
+├── main.nf                      # Main pipeline orchestrator
+├── nextflow.config              # Configuration
+├── modules/
+│   ├── bam_processing.nf        # BAM QC and processing
+│   ├── bedgraph_normalization.nf# Spike-in normalization
+│   ├── bigwig_generation.nf     # BigWig creation
+│   └── peak_calling.nf          # Peak calling and filtering
+├── workflows/
+│   └── complex_binding.nf       # Consensus analysis (optional)
+├── SEACR_1.3.sh                 # Peak caller script
+├── ENCFF356LFX.bed.gz           # ENCODE blacklist
+└── GRCh38.p13.chrom.sizes       # Genome sizes
+```
 
 ## Iterative Development
 
 The pipeline supports Nextflow's `-resume` flag for efficient iteration:
 ```bash
 # First run
-nextflow run main.nf --sample_list samples.txt
+nextflow run main.nf
 
 # Modify a module
-nano modules/bigwig_generation.nf
+nano modules/peak_calling.nf
 
 # Re-run - only changed parts execute
-nextflow run main.nf --sample_list samples.txt -resume
+nextflow run main.nf -resume
 ```
 
 ## Documentation
@@ -158,10 +265,30 @@ nextflow run main.nf --sample_list samples.txt -resume
 - [Usage Guide](docs/usage.md)
 - [Development Notes](DEVELOPMENT.md)
 
+## Key Features
+
+### Adaptive Peak Filtering
+- Calculates IgG background statistics per sample
+- Hybrid threshold combines statistical and biological criteria
+- Handles biological negatives (e.g., nonsense mutants)
+- Validated on 72 samples across 6 genotypes
+
+### Modular Design
+- Independent, reusable modules
+- Optional analysis workflows
+- Easy to add new modules or customize existing ones
+
+### Production Ready
+- Comprehensive error handling
+- Detailed logging and reporting
+- Resume capability for failed runs
+- Resource-aware parallelization
+
 ## Author
 
 Garrett Cooper  
-Emory University
+Emory University  
+PhD Candidate, Genetics and Molecular Biology
 
 ## Citation
 
